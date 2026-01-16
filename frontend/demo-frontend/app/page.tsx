@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import { streamOptimizeProtocol, streamRunSimulation } from "@/lib/api";
 import {
   AgentMessageEvent,
   FinalEvent,
@@ -11,8 +12,8 @@ import {
   RunRequest,
   RunResponse,
 } from "@/lib/types";
-import { streamOptimizeProtocol, streamRunSimulation } from "@/lib/api";
-import { OptimizationTree, NodeDetailPanel } from "./OptimizationTree";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { NodeDetailPanel, OptimizationTree } from "./OptimizationTree";
 
 type Tab = "settings" | "simulate" | "optimize";
 
@@ -242,44 +243,40 @@ export default function Home() {
         <div className="flex-1 overflow-hidden">
 
         {tab === "settings" && (
-          <section className="h-full overflow-auto grid gap-4 lg:grid-cols-2 content-start">
-            <div className="rounded-2xl bg-white/10 p-5 ring-1 ring-white/10 backdrop-blur">
-              <div className="flex items-center justify-between">
-                <h2 className="text-base font-semibold text-white">
-                  Agent prompts
-                </h2>
-                <span className="rounded-full bg-indigo-500/20 px-3 py-1 text-xs font-semibold text-indigo-200">
-                  Shared across tabs
-                </span>
-              </div>
-              <div className="mt-4 space-y-4">
+          <section className="h-full overflow-auto space-y-4 content-start">
+            {/* Agent prompts section - top with side by side layout */}
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-base font-semibold text-white">
+                Agent prompts
+              </h2>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="rounded-2xl bg-white/10 p-5 ring-1 ring-white/10 backdrop-blur">
                 <Field
                   label="Agent 1 prompt"
                   value={agent1Prompt}
                   onChange={setAgent1Prompt}
                   placeholder="Describe the role and context for agent 1"
+                  rows={10}
                 />
+              </div>
+              <div className="rounded-2xl bg-white/10 p-5 ring-1 ring-white/10 backdrop-blur">
                 <Field
                   label="Agent 2 prompt"
                   value={agent2Prompt}
                   onChange={setAgent2Prompt}
                   placeholder="Describe the role and context for agent 2"
+                  rows={10}
                 />
               </div>
             </div>
 
-            <div className="rounded-2xl bg-white/10 p-5 ring-1 ring-white/10 backdrop-blur">
+            {/* Communication protocol section - bottom spanning full width */}
+            <div className="rounded-2xl bg-white/10 p-5 ring-1 ring-white/10 backdrop-blur mt-4">
               <div className="flex items-center justify-between gap-3">
                 <h2 className="text-base font-semibold text-white">
                   Communication protocol
                 </h2>
-                <button
-                  type="button"
-                  onClick={() => setTab("simulate")}
-                  className="text-xs font-semibold text-indigo-300 transition hover:text-indigo-100"
-                >
-                  Preview in simulation
-                </button>
               </div>
               <div className="mt-4 space-y-4">
                 <Field
@@ -288,9 +285,6 @@ export default function Home() {
                   onChange={setProtocol}
                   placeholder="Outline how the agents should communicate"
                 />
-                <p className="text-sm text-slate-400">
-                  Changes here instantly feed both the live Simulation and the Optimization tabs.
-                </p>
               </div>
             </div>
           </section>
@@ -374,7 +368,7 @@ export default function Home() {
                       <p className="text-xs text-white/50 uppercase tracking-wider mb-1">Final Response</p>
                       <div className="text-sm leading-relaxed text-white/90 max-h-32 overflow-auto prose prose-invert prose-sm max-w-none">
                         {finalEvent?.message ? (
-                          <Markdown content={finalEvent.message} />
+                          <ReactMarkdown>{finalEvent.message}</ReactMarkdown>
                         ) : (
                           <p>{runLoading ? "Waiting for agents..." : "Run a simulation to see the result."}</p>
                         )}
@@ -577,6 +571,7 @@ type FieldProps = {
   onChange: (value: string) => void;
   placeholder?: string;
   singleLine?: boolean;
+  rows?: number;
 };
 
 function Field({
@@ -585,6 +580,7 @@ function Field({
   onChange,
   placeholder,
   singleLine = false,
+  rows = 5,
 }: FieldProps) {
   return (
     <label className="group relative block">
@@ -601,7 +597,7 @@ function Field({
       ) : (
         <textarea
           className="mt-2 w-full rounded-lg bg-white/10 px-3 py-2 text-sm text-white placeholder-white/40 outline-none ring-1 ring-white/10 transition focus:ring-indigo-400/50"
-          rows={5}
+          rows={rows}
           value={value}
           placeholder={placeholder}
           onChange={(e) => onChange(e.target.value)}
