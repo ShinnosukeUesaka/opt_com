@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import {
   AgentMessageEvent,
   FinalEvent,
@@ -11,10 +12,12 @@ import {
   RunRequest,
   RunResponse,
 } from "@/lib/types";
-import { streamOptimizeProtocol, streamRunSimulation } from "@/lib/api";
+import { fetchTtsAudio, streamOptimizeProtocol, streamRunSimulation } from "@/lib/api";
 import { OptimizationTree, NodeDetailPanel } from "./OptimizationTree";
 
 type Tab = "settings" | "simulate" | "optimize";
+
+const Markdown = ({ content }: { content: string }) => <ReactMarkdown>{content}</ReactMarkdown>;
 
 const defaultAgent1Prompt = `You are an scheduling assistant for Tom. Here is Tom's schedule:
 Monday: 9am-11am Team Meeting, 2pm-3pm Client Call
@@ -37,8 +40,42 @@ You can only use the communication channel once, therefore include all the relev
 const defaultProtocol = `This is a communication channel between Tom and Jerry's agents.
 When you communicate, avoid extra greetings.`;
 
+const defaultAgent1Name = "Tom's agent";
+const defaultAgent2Name = "Jerry's agent";
+const agentNameStorageKey = "optcom:agent-names";
+
+const parseStoredAgentNames = (value: string | null) => {
+  if (!value) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(value) as {
+      agent1Name?: unknown;
+      agent2Name?: unknown;
+    };
+    if (!parsed || typeof parsed !== "object") {
+      return null;
+    }
+    return {
+      agent1Name:
+        typeof parsed.agent1Name === "string"
+          ? parsed.agent1Name
+          : defaultAgent1Name,
+      agent2Name:
+        typeof parsed.agent2Name === "string"
+          ? parsed.agent2Name
+          : defaultAgent2Name,
+    };
+  } catch {
+    return null;
+  }
+};
+
 export default function Home() {
   const [tab, setTab] = useState<Tab>("simulate");
+  const [agent1Name, setAgent1Name] = useState(defaultAgent1Name);
+  const [agent2Name, setAgent2Name] = useState(defaultAgent2Name);
+  const [agentNamesLoaded, setAgentNamesLoaded] = useState(false);
   const [agent1Prompt, setAgent1Prompt] = useState(defaultAgent1Prompt);
   const [agent2Prompt, setAgent2Prompt] = useState(defaultAgent2Prompt);
   const [protocol, setProtocol] = useState(defaultProtocol);
@@ -51,6 +88,10 @@ export default function Home() {
   const [runLoading, setRunLoading] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const streamCancelRef = useRef<(() => void) | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
+  const [ttsLoading, setTtsLoading] = useState(false);
+  const [ttsError, setTtsError] = useState<string | null>(null);
 
   const [optPrompts, setOptPrompts] = useState(
     ["I need to schedule a meeting with Jerry this week."].join("\n"),
@@ -92,9 +133,59 @@ export default function Home() {
     () => () => {
       streamCancelRef.current?.();
       optCancelRef.current?.();
+      audioRef.current?.pause();
+      if (audioUrlRef.current) {
+        URL.revokeObjectURL(audioUrlRef.current);
+        audioUrlRef.current = null;
+      }
     },
     [],
   );
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const stored = parseStoredAgentNames(
+      window.localStorage.getItem(agentNameStorageKey),
+    );
+    if (stored) {
+      setAgent1Name(stored.agent1Name);
+      setAgent2Name(stored.agent2Name);
+    }
+    setAgentNamesLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!agentNamesLoaded || typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem(
+      agentNameStorageKey,
+      JSON.stringify({ agent1Name, agent2Name }),
+    );
+  }, [agent1Name, agent2Name, agentNamesLoaded]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== agentNameStorageKey) {
+        return;
+      }
+      const stored = parseStoredAgentNames(event.newValue);
+      if (!stored) {
+        setAgent1Name(defaultAgent1Name);
+        setAgent2Name(defaultAgent2Name);
+        return;
+      }
+      setAgent1Name(stored.agent1Name);
+      setAgent2Name(stored.agent2Name);
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
 
   const handleRun = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -105,6 +196,8 @@ export default function Home() {
     setEvents([]);
 
     const payload: RunRequest = {
+      agent1Name,
+      agent2Name,
       agent1Prompt,
       agent2Prompt,
       protocol,
@@ -131,6 +224,36 @@ export default function Home() {
       },
     });
   };
+
+  const handleSpeakMessage = useCallback(async (message: AgentMessageEvent) => {
+    if (!message.message.trim() || ttsLoading) {
+      return;
+    }
+    setTtsError(null);
+    setTtsLoading(true);
+    try {
+      const audioBlob = await fetchTtsAudio({ text: message.message });
+      if (!audioRef.current) {
+        audioRef.current = new Audio();
+      } else {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+      if (audioUrlRef.current) {
+        URL.revokeObjectURL(audioUrlRef.current);
+      }
+      const objectUrl = URL.createObjectURL(audioBlob);
+      audioUrlRef.current = objectUrl;
+      audioRef.current.src = objectUrl;
+      await audioRef.current.play();
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error ? err.message : "Failed to play audio";
+      setTtsError(errorMessage);
+    } finally {
+      setTtsLoading(false);
+    }
+  }, [ttsLoading]);
 
   const handleOptimizeEvent = useCallback((event: OptimizeStreamEvent) => {
     switch (event.type) {
@@ -177,6 +300,8 @@ export default function Home() {
       .filter(Boolean);
 
     const payload: OptimizeRequest = {
+      agent1Name,
+      agent2Name,
       agent1Prompt,
       agent2Prompt,
       protocol,
@@ -242,55 +367,79 @@ export default function Home() {
         <div className="flex-1 overflow-hidden">
 
         {tab === "settings" && (
-          <section className="h-full overflow-auto grid gap-4 lg:grid-cols-2 content-start">
+          <section className="h-full overflow-auto grid gap-4 content-start">
             <div className="rounded-2xl bg-white/10 p-5 ring-1 ring-white/10 backdrop-blur">
               <div className="flex items-center justify-between">
                 <h2 className="text-base font-semibold text-white">
-                  Agent prompts
+                  Agent setup
                 </h2>
                 <span className="rounded-full bg-indigo-500/20 px-3 py-1 text-xs font-semibold text-indigo-200">
                   Shared across tabs
                 </span>
               </div>
-              <div className="mt-4 space-y-4">
-                <Field
-                  label="Agent 1 prompt"
-                  value={agent1Prompt}
-                  onChange={setAgent1Prompt}
-                  placeholder="Describe the role and context for agent 1"
-                />
-                <Field
-                  label="Agent 2 prompt"
-                  value={agent2Prompt}
-                  onChange={setAgent2Prompt}
-                  placeholder="Describe the role and context for agent 2"
-                />
+              <div className="mt-4 grid gap-6 lg:grid-cols-2">
+                <div className="space-y-4 rounded-xl bg-white/5 p-4 ring-1 ring-white/10">
+                  <p className="text-xs font-semibold uppercase tracking-[0.25em] text-white/50">
+                    Agent 1
+                  </p>
+                  <Field
+                    label="Name"
+                    value={agent1Name}
+                    onChange={setAgent1Name}
+                    placeholder="Name for agent 1"
+                    singleLine
+                  />
+                  <Field
+                    label="Prompt"
+                    value={agent1Prompt}
+                    onChange={setAgent1Prompt}
+                    placeholder="Describe the role and context for agent 1"
+                  />
+                </div>
+                <div className="space-y-4 rounded-xl bg-white/5 p-4 ring-1 ring-white/10">
+                  <p className="text-xs font-semibold uppercase tracking-[0.25em] text-white/50">
+                    Agent 2
+                  </p>
+                  <Field
+                    label="Name"
+                    value={agent2Name}
+                    onChange={setAgent2Name}
+                    placeholder="Name for agent 2"
+                    singleLine
+                  />
+                  <Field
+                    label="Prompt"
+                    value={agent2Prompt}
+                    onChange={setAgent2Prompt}
+                    placeholder="Describe the role and context for agent 2"
+                  />
+                </div>
               </div>
-            </div>
 
-            <div className="rounded-2xl bg-white/10 p-5 ring-1 ring-white/10 backdrop-blur">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-base font-semibold text-white">
-                  Communication protocol
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => setTab("simulate")}
-                  className="text-xs font-semibold text-indigo-300 transition hover:text-indigo-100"
-                >
-                  Preview in simulation
-                </button>
-              </div>
-              <div className="mt-4 space-y-4">
-                <Field
-                  label="Protocol"
-                  value={protocol}
-                  onChange={setProtocol}
-                  placeholder="Outline how the agents should communicate"
-                />
-                <p className="text-sm text-slate-400">
-                  Changes here instantly feed both the live Simulation and the Optimization tabs.
-                </p>
+              <div className="mt-6 border-t border-white/10 pt-6">
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="text-base font-semibold text-white">
+                    Communication protocol
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => setTab("simulate")}
+                    className="text-xs font-semibold text-indigo-300 transition hover:text-indigo-100"
+                  >
+                    Preview in simulation
+                  </button>
+                </div>
+                <div className="mt-4 space-y-4">
+                  <Field
+                    label="Protocol"
+                    value={protocol}
+                    onChange={setProtocol}
+                    placeholder="Outline how the agents should communicate"
+                  />
+                  <p className="text-sm text-slate-400">
+                    Changes here instantly feed both the live Simulation and the Optimization tabs.
+                  </p>
+                </div>
               </div>
             </div>
           </section>
@@ -323,24 +472,35 @@ export default function Home() {
                       </span>
                     ) : null}
                   </div>
+                  <div className="flex items-center gap-2 text-xs text-indigo-100/80">
+                    {ttsLoading ? <span>Preparing audio...</span> : null}
+                  </div>
                 </div>
+                {ttsError && (
+                  <p className="mb-2 text-xs text-rose-300">TTS: {ttsError}</p>
+                )}
 
                 {/* Main agent visualization - takes most of the space */}
                 <div className="flex-1 flex items-center justify-center gap-8 min-h-0">
                   <AgentCard
-                    name="Agent 1"
+                    name={agent1Name}
                     accent="from-indigo-400 to-cyan-300"
                     active={speakingAgent === "agent1" || runLoading}
-                    note={speakingAgent === "agent1" ? "Speaking" : "Listening"}
+                    note={speakingAgent === "agent1" ? "Speaking" : undefined}
                   />
                   <div className="flex-1 max-w-4xl h-full">
-                    <MessageArc events={messageEvents} running={runLoading} />
+                    <MessageArc
+                      events={messageEvents}
+                      running={runLoading}
+                      onSpeak={handleSpeakMessage}
+                      ttsLoading={ttsLoading}
+                    />
                   </div>
                   <AgentCard
-                    name="Agent 2"
+                    name={agent2Name}
                     accent="from-emerald-400 to-lime-300"
                     active={speakingAgent === "agent2" || runLoading}
-                    note={speakingAgent === "agent2" ? "Speaking" : "Listening"}
+                    note={speakingAgent === "agent2" ? "Speaking" : undefined}
                   />
                 </div>
 
@@ -350,11 +510,13 @@ export default function Home() {
                     <form onSubmit={handleRun}>
                       <div className="flex gap-3 items-end">
                         <div className="flex-1">
-                          <label className="text-xs font-medium text-white/50 uppercase tracking-wider">Message to Agent 1</label>
+                          <label className="text-xs font-medium text-white/50 uppercase tracking-wider">
+                            Message to {agent1Name}
+                          </label>
                           <input
                             className="mt-1 w-full rounded-lg bg-white/10 px-3 py-2 text-sm text-white placeholder-white/40 outline-none ring-1 ring-white/10 focus:ring-indigo-400/50"
                             value={userInput}
-                            placeholder="What should Agent 1 ask?"
+                            placeholder={`What should ${agent1Name} ask?`}
                             onChange={(e) => setUserInput(e.target.value)}
                           />
                         </div>
@@ -674,9 +836,11 @@ function AgentCard({ name, accent, active = false, note }: AgentCardProps) {
 type MessageArcProps = {
   events: AgentMessageEvent[];
   running: boolean;
+  onSpeak?: (message: AgentMessageEvent) => void;
+  ttsLoading?: boolean;
 };
 
-function MessageArc({ events, running }: MessageArcProps) {
+function MessageArc({ events, running, onSpeak, ttsLoading = false }: MessageArcProps) {
   // Get the latest message for each direction (only show one per direction)
   const outboundMessage = events.filter(e => e.direction === "outbound").slice(-1)[0];
   const returnMessage = events.filter(e => e.direction === "return").slice(-1)[0];
@@ -757,7 +921,14 @@ function MessageArc({ events, running }: MessageArcProps) {
           key={`outbound-msg-${events.filter(e => e.direction === "outbound").length}`}
           className="message-fade-in absolute left-1/2 top-2 -translate-x-1/2 transform w-full max-w-[90%] px-4"
         >
-          <div className="rounded-xl border border-indigo-400/30 bg-indigo-950/90 px-4 py-3 shadow-lg shadow-indigo-500/20 backdrop-blur-sm">
+          <button
+            type="button"
+            onClick={() => onSpeak?.(outboundMessage)}
+            disabled={!onSpeak || ttsLoading}
+            title="Click to play this message"
+            aria-label={`Play message from ${outboundMessage.from} to ${outboundMessage.to}`}
+            className="w-full rounded-xl border border-indigo-400/30 bg-indigo-950/90 px-4 py-3 text-left shadow-lg shadow-indigo-500/20 backdrop-blur-sm transition hover:bg-indigo-900/80 disabled:cursor-not-allowed disabled:opacity-70"
+          >
             <div className="mb-2 flex items-center justify-center gap-2 text-xs font-semibold text-indigo-300">
               <span>{outboundMessage.from}</span>
               <ArrowIcon direction="right" />
@@ -766,7 +937,7 @@ function MessageArc({ events, running }: MessageArcProps) {
             <p className="text-sm leading-relaxed text-white max-h-24 overflow-auto">
               {outboundMessage.message}
             </p>
-          </div>
+          </button>
         </div>
       )}
 
@@ -776,7 +947,14 @@ function MessageArc({ events, running }: MessageArcProps) {
           key={`return-msg-${events.filter(e => e.direction === "return").length}`}
           className="message-fade-in absolute bottom-2 left-1/2 -translate-x-1/2 transform w-full max-w-[90%] px-4"
         >
-          <div className="rounded-xl border border-emerald-400/30 bg-emerald-950/90 px-4 py-3 shadow-lg shadow-emerald-500/20 backdrop-blur-sm">
+          <button
+            type="button"
+            onClick={() => onSpeak?.(returnMessage)}
+            disabled={!onSpeak || ttsLoading}
+            title="Click to play this message"
+            aria-label={`Play message from ${returnMessage.from} to ${returnMessage.to}`}
+            className="w-full rounded-xl border border-emerald-400/30 bg-emerald-950/90 px-4 py-3 text-left shadow-lg shadow-emerald-500/20 backdrop-blur-sm transition hover:bg-emerald-900/80 disabled:cursor-not-allowed disabled:opacity-70"
+          >
             <div className="mb-2 flex items-center justify-center gap-2 text-xs font-semibold text-emerald-300">
               <span>{returnMessage.from}</span>
               <ArrowIcon direction="left" />
@@ -785,17 +963,13 @@ function MessageArc({ events, running }: MessageArcProps) {
             <p className="text-sm leading-relaxed text-white max-h-24 overflow-auto">
               {returnMessage.message}
             </p>
-          </div>
+          </button>
         </div>
       )}
 
       {/* Idle state message */}
       {!events.length && !running && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <p className="text-sm text-indigo-100/60">
-            Trigger a simulation to watch messages flow between agents
-          </p>
-        </div>
+        <div className="absolute inset-0 flex items-center justify-center" />
       )}
 
       {/* Streaming indicator when no messages yet */}
