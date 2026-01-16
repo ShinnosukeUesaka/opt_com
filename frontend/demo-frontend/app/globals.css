@@ -1,0 +1,109 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  font-family: "Space Grotesk", "Soehne", "Manrope", sans-serif;
+}
+
+::selection {
+  background: rgba(129, 140, 248, 0.2);
+}
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Arc message animation keyframes */
+@keyframes moveAlongTopArc {
+  0% {
+    offset-distance: 0%;
+    opacity: 0;
+  }
+  5% {
+    opacity: 1;
+  }
+  95% {
+    opacity: 1;
+  }
+  100% {
+    offset-distance: 100%;
+    opacity: 0;
+  }
+}
+
+@keyframes moveAlongBottomArc {
+  0% {
+    offset-distance: 0%;
+    opacity: 0;
+  }
+  5% {
+    opacity: 1;
+  }
+  95% {
+    opacity: 1;
+  }
+  100% {
+    offset-distance: 100%;
+    opacity: 0;
+  }
+}
+
+@keyframes dotPulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.4);
+    opacity: 1;
+  }
+}
+
+@keyframes fadeInMessage {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.arc-dot-top {
+  offset-path: path("M 40 135 Q 200 30, 360 135");
+  animation: moveAlongTopArc 2s ease-in-out forwards, dotPulse 0.8s ease-in-out infinite;
+}
+
+.arc-dot-bottom {
+  offset-path: path("M 360 165 Q 200 270, 40 165");
+  animation: moveAlongBottomArc 2s ease-in-out forwards, dotPulse 0.8s ease-in-out infinite;
+}
+
+.message-fade-in {
+  animation: fadeInMessage 0.4s ease-out forwards;
+}
