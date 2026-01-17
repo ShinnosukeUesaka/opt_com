@@ -51,7 +51,7 @@ class TTSRequest(BaseModel):
     output_format: Optional[str] = None
 
 
-DEFAULT_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"
+DEFAULT_VOICE_ID = "onwK4e9ZLuTAKqWW03F9"
 DEFAULT_MODEL_ID = "eleven_multilingual_v2"
 DEFAULT_OUTPUT_FORMAT = "mp3_44100_128"
 
